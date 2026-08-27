@@ -194,7 +194,7 @@ export class ReceiptsService {
       let receiptReference: string | undefined;
       if (rpcResult.events && Array.isArray(rpcResult.events)) {
         // Look for receipt reference in escrow-related events
-        const receiptRefEvent = rpcResult.events.find((event: any) => {
+        const receiptRefEvent = rpcResult.events.find((event: { topics?: string[]; value?: { receipt_reference?: string } }) => {
           const topics = event.topics || [];
           const topicStr = topics[0];
           // Check for escrow events that contain receipt_reference

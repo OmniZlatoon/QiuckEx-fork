@@ -8,7 +8,11 @@ use soroban_sdk::{contractevent, Address, Bytes, BytesN, Env};
 /// The receipt reference is derived from the escrow_id and action type to ensure
 /// that the same escrow action always produces the same receipt reference.
 #[allow(dead_code)]
-pub(crate) fn generate_receipt_reference(env: &Env, escrow_id: &BytesN<32>, action: &str) -> BytesN<32> {
+pub(crate) fn generate_receipt_reference(
+    env: &Env,
+    escrow_id: &BytesN<32>,
+    action: &str,
+) -> BytesN<32> {
     let mut payload = Bytes::new(env);
     let escrow_bytes: Bytes = escrow_id.into();
     payload.append(&escrow_bytes);
@@ -255,13 +259,25 @@ pub const EVENT_SCHEMAS: &[EventSchema] = &[
     EventSchema {
         name: "EscrowFinalized",
         topics: &[EVENT_TOPIC_ESCROW, "EscrowFinalized", "escrow_id", "owner"],
-        payload_keys: &["receipt_reference", "schema_version", "timestamp", "token", "total_amount"],
+        payload_keys: &[
+            "receipt_reference",
+            "schema_version",
+            "timestamp",
+            "token",
+            "total_amount",
+        ],
         schema_version: EVENT_SCHEMA_VERSION,
     },
     EventSchema {
         name: "EscrowRefunded",
         topics: &[EVENT_TOPIC_ESCROW, "EscrowRefunded", "escrow_id", "owner"],
-        payload_keys: &["amount", "receipt_reference", "schema_version", "timestamp", "token"],
+        payload_keys: &[
+            "amount",
+            "receipt_reference",
+            "schema_version",
+            "timestamp",
+            "token",
+        ],
         schema_version: EVENT_SCHEMA_VERSION,
     },
     EventSchema {
@@ -280,7 +296,14 @@ pub const EVENT_SCHEMAS: &[EventSchema] = &[
     EventSchema {
         name: "EscrowWithdrawn",
         topics: &[EVENT_TOPIC_ESCROW, "EscrowWithdrawn", "escrow_id", "owner"],
-        payload_keys: &["amount", "fee", "receipt_reference", "schema_version", "timestamp", "token"],
+        payload_keys: &[
+            "amount",
+            "fee",
+            "receipt_reference",
+            "schema_version",
+            "timestamp",
+            "token",
+        ],
         schema_version: EVENT_SCHEMA_VERSION,
     },
     EventSchema {

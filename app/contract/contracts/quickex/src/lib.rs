@@ -25,8 +25,6 @@ mod escrow_id;
 #[cfg(test)]
 mod escrow_id_test;
 mod events;
-#[cfg(test)]
-mod receipt_reference_test;
 mod fee;
 mod fee_router;
 #[cfg(test)]
@@ -50,6 +48,8 @@ mod pause_policy;
 #[cfg(test)]
 mod pause_policy_test;
 mod privacy;
+#[cfg(test)]
+mod receipt_reference_test;
 #[cfg(test)]
 mod role_test;
 #[cfg(test)]

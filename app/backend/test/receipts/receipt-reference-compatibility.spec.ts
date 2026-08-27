@@ -8,13 +8,18 @@
  */
 
 import { ReceiptNormalizer, SorobanRpcResult, HorizonOperation, HorizonTransaction, IndexerMetadata } from '../../src/receipts/normalizers/receipt.normalizer';
-import { NormalizedReceipt } from '../../src/receipts/schemas/receipt.schema';
+import { ReceiptHashService } from '../../src/receipts/receipt-hash.service';
+
 
 describe('Receipt Reference Compatibility (SC-W7-07)', () => {
   let normalizer: ReceiptNormalizer;
 
   beforeEach(() => {
-    normalizer = new ReceiptNormalizer({} as any);
+    // Create a minimal mock of the required dependencies
+    const mockReceiptHashService = {
+      computeHash: jest.fn().mockReturnValue('rch_test_hash_1234567890abcdef'),
+    };
+    normalizer = new ReceiptNormalizer(mockReceiptHashService as ReceiptHashService);
   });
 
   // ---------------------------------------------------------------------------
