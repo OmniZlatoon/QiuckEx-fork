@@ -372,6 +372,7 @@ fn test_event_schema_catalog_locks_canonical_topics_and_payloads() {
             "amount_due",
             "amount_paid",
             "expires_at",
+            "receipt_reference",
             "schema_version",
             "timestamp",
             "token"
