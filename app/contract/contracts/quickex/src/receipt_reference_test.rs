@@ -1,160 +1,278 @@
-//! # Receipt Reference Event Tests — SC-W7-07
+//! Receipt reference determinism tests (SC-W7-07).
 //!
-//! Tests for deterministic receipt reference emission in contract events.
-//! Validates that receipt references:
-//! - Remain deterministic across multiple calls with same inputs
-//! - Are unique across different escrow actions
-//! - Follow the expected schema format
-//! - Are properly included in event schemas
+//! Verifies that the receipt references emitted in create, release, and
+//! refund-related contract events are deterministic, stable across ledger
+//! time, and action/escrow specific.
 
-use crate::events;
-use soroban_sdk::{BytesN, Env};
+use crate::{
+    events::{
+        generate_receipt_reference, RECEIPT_REF_ACTION_DEPOSIT, RECEIPT_REF_ACTION_FINALIZE,
+        RECEIPT_REF_ACTION_REFUND, RECEIPT_REF_ACTION_REFUND_FINALIZED,
+        RECEIPT_REF_ACTION_WITHDRAW,
+    },
+    QuickexContract, QuickexContractClient,
+};
 
-// ---------------------------------------------------------------------------
-// Deterministic receipt reference generation tests
-// ---------------------------------------------------------------------------
+use soroban_sdk::{
+    testutils::{Address as _, Events as _, Ledger},
+    token, Address, Bytes, BytesN, Env, Map, Symbol, TryIntoVal, Val, Vec,
+};
 
-#[test]
-fn receipt_reference_is_deterministic_for_same_escrow_id() {
+fn latest_contract_event(env: &Env, contract_id: &Address) -> (Vec<Val>, Val) {
+    let all = env.events().all();
+    let len = all.len();
+
+    extern crate std;
+    let expected_str = std::format!("{:?}", contract_id);
+
+    for i in (0..len).rev() {
+        let event = all.get(i).unwrap();
+        if std::format!("{:?}", event.0) == expected_str {
+            return (event.1, event.2);
+        }
+    }
+
+    panic!("no contract event found for contract id")
+}
+
+fn event_data_map(env: &Env, data: Val) -> Map<Symbol, Val> {
+    data.try_into_val(env).unwrap()
+}
+
+fn receipt_reference_from_event(env: &Env, data: Val) -> BytesN<32> {
+    event_data_map(env, data)
+        .get(Symbol::new(env, "receipt_reference"))
+        .expect("receipt_reference payload key present")
+        .try_into_val(env)
+        .unwrap()
+}
+
+fn setup<'a>() -> (Env, Address, QuickexContractClient<'a>) {
     let env = Env::default();
-    let escrow_id = BytesN::from_array(&env, &[0x01u8; 32]);
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(admin).address();
+    let contract_id = env.register(QuickexContract, ());
+    let client = QuickexContractClient::new(&env, &contract_id);
+    (env, token_id, client)
+}
 
-    // Generate receipt reference twice with same inputs
-    let ref1 = events::generate_receipt_reference(&env, &escrow_id, "deposit");
-    let ref2 = events::generate_receipt_reference(&env, &escrow_id, "deposit");
-
-    assert_eq!(ref1, ref2, "Receipt reference must be deterministic");
+fn mint(env: &Env, token_id: &Address, to: &Address, amount: i128) {
+    token::StellarAssetClient::new(env, token_id).mint(to, &amount);
 }
 
 #[test]
-fn receipt_reference_differs_by_action_type() {
+fn test_receipt_reference_is_deterministic_across_ledger_time() {
     let env = Env::default();
-    let escrow_id = BytesN::from_array(&env, &[0x01u8; 32]);
+    let escrow_id = BytesN::from_array(&env, &[1; 32]);
 
-    let deposit_ref = events::generate_receipt_reference(&env, &escrow_id, "deposit");
-    let withdraw_ref = events::generate_receipt_reference(&env, &escrow_id, "withdraw");
-    let refund_ref = events::generate_receipt_reference(&env, &escrow_id, "refund");
+    env.ledger().set_timestamp(1_000);
+    let first = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_DEPOSIT);
 
-    assert_ne!(
-        deposit_ref, withdraw_ref,
-        "Different actions must have different receipt references"
-    );
-    assert_ne!(
-        deposit_ref, refund_ref,
-        "Different actions must have different receipt references"
-    );
-    assert_ne!(
-        withdraw_ref, refund_ref,
-        "Different actions must have different receipt references"
-    );
-}
+    env.ledger().set_timestamp(9_999_999);
+    let second = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_DEPOSIT);
 
-#[test]
-fn receipt_reference_differs_by_escrow_id() {
-    let env = Env::default();
-    let escrow_id_1 = BytesN::from_array(&env, &[0x01u8; 32]);
-    let escrow_id_2 = BytesN::from_array(&env, &[0x02u8; 32]);
-
-    let ref1 = events::generate_receipt_reference(&env, &escrow_id_1, "deposit");
-    let ref2 = events::generate_receipt_reference(&env, &escrow_id_2, "deposit");
-
-    assert_ne!(
-        ref1, ref2,
-        "Different escrow IDs must have different receipt references"
-    );
-}
-
-#[test]
-fn receipt_reference_is_valid_sha256_hash() {
-    let env = Env::default();
-    let escrow_id = BytesN::from_array(&env, &[0x01u8; 32]);
-
-    let receipt_ref = events::generate_receipt_reference(&env, &escrow_id, "deposit");
-
-    // Verify it's a 32-byte hash
-    let receipt_bytes: [u8; 32] = receipt_ref.into();
     assert_eq!(
-        receipt_bytes.len(),
-        32,
-        "Receipt reference must be 32 bytes"
-    );
-
-    // Verify it's not all zeros (unlikely for SHA-256)
-    assert_ne!(
-        receipt_bytes, [0u8; 32],
-        "Receipt reference should not be all zeros"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Event emission tests with receipt references
-// ---------------------------------------------------------------------------
-
-// Note: Full contract integration tests are skipped due to token setup complexity.
-// The core receipt reference generation functionality is tested above.
-// Event emission is validated by ensuring the contract compiles and the
-// receipt reference fields are included in the event schemas.
-
-// ---------------------------------------------------------------------------
-// Schema version compatibility tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn event_schema_version_includes_receipt_reference_version() {
-    use crate::events::EVENT_SCHEMA_VERSION;
-
-    // Should be version 3 (which added receipt references)
-    assert_eq!(
-        EVENT_SCHEMA_VERSION, 3,
-        "Event schema version should be 3 with receipt references"
+        first, second,
+        "receipt reference must not depend on ledger time"
     );
 }
 
 #[test]
-fn receipt_reference_fields_in_event_schemas() {
-    use crate::events::{EVENT_SCHEMAS, EVENT_SCHEMA_VERSION};
+fn test_receipt_reference_differs_by_action() {
+    let env = Env::default();
+    let escrow_id = BytesN::from_array(&env, &[2; 32]);
 
-    // Check that relevant events include receipt_reference in their schema
-    let events_with_receipt_ref = [
-        "EscrowDeposited",
-        "EscrowWithdrawn",
-        "EscrowRefunded",
-        "RefundFinalized",
-        "EscrowFinalized",
-    ];
+    let deposit = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_DEPOSIT);
+    let withdraw = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_WITHDRAW);
+    let refund = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_REFUND);
+    let refund_finalized =
+        generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_REFUND_FINALIZED);
+    let finalize = generate_receipt_reference(&env, &escrow_id, RECEIPT_REF_ACTION_FINALIZE);
 
-    for event_name in events_with_receipt_ref {
-        let schema = EVENT_SCHEMAS
-            .iter()
-            .find(|s| s.name == event_name)
-            .unwrap_or_else(|| panic!("Event {} should be in EVENT_SCHEMAS", event_name));
-
-        assert_eq!(
-            schema.schema_version, EVENT_SCHEMA_VERSION,
-            "{} should have current schema version",
-            event_name
-        );
-
-        assert!(
-            schema.payload_keys.contains(&"receipt_reference"),
-            "{} payload_keys should contain receipt_reference",
-            event_name
-        );
+    let refs = [deposit, withdraw, refund, refund_finalized, finalize];
+    for i in 0..refs.len() {
+        for j in (i + 1)..refs.len() {
+            assert_ne!(
+                refs[i], refs[j],
+                "different actions must produce different receipt references"
+            );
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Determinism across ledger states
-// ---------------------------------------------------------------------------
+#[test]
+fn test_receipt_reference_differs_by_escrow() {
+    let env = Env::default();
+    let escrow_a = BytesN::from_array(&env, &[3; 32]);
+    let escrow_b = BytesN::from_array(&env, &[4; 32]);
+
+    let ref_a = generate_receipt_reference(&env, &escrow_a, RECEIPT_REF_ACTION_DEPOSIT);
+    let ref_b = generate_receipt_reference(&env, &escrow_b, RECEIPT_REF_ACTION_DEPOSIT);
+
+    assert_ne!(
+        ref_a, ref_b,
+        "different escrows must produce different references"
+    );
+}
 
 #[test]
-fn receipt_reference_deterministic_across_ledger_times() {
-    let env = Env::default();
-    let escrow_id = BytesN::from_array(&env, &[0x01u8; 32]);
+fn test_deposit_event_emits_deterministic_receipt_reference() {
+    let (env, token_id, client) = setup();
+    let owner = Address::generate(&env);
+    mint(&env, &token_id, &owner, 1000);
 
-    // Generate receipt reference - should be deterministic regardless of ledger state
-    let ref1 = events::generate_receipt_reference(&env, &escrow_id, "deposit");
-    let ref2 = events::generate_receipt_reference(&env, &escrow_id, "deposit");
+    let salt = Bytes::from_slice(&env, b"rr_deposit_salt");
+    let commitment = client.deposit(
+        &token_id,
+        &1000,
+        &owner,
+        &salt,
+        &0u64,
+        &None,
+        &0u64,
+        &u64::MAX,
+    );
 
-    assert_eq!(ref1, ref2, "Receipt reference should be deterministic");
+    let (topics, data) = latest_contract_event(&env, &client.address);
+    let event_name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "EscrowDeposited"));
+
+    let actual = receipt_reference_from_event(&env, data);
+    let expected = generate_receipt_reference(&env, &commitment, RECEIPT_REF_ACTION_DEPOSIT);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_withdraw_event_emits_deterministic_receipt_reference() {
+    let (env, token_id, client) = setup();
+    let owner = Address::generate(&env);
+    mint(&env, &token_id, &owner, 1000);
+
+    let salt = Bytes::from_slice(&env, b"rr_withdraw_salt");
+    let commitment = client.deposit(
+        &token_id,
+        &1000,
+        &owner,
+        &salt,
+        &0u64,
+        &None,
+        &0u64,
+        &u64::MAX,
+    );
+
+    let _ = client.withdraw(
+        &token_id,
+        &1000,
+        &commitment,
+        &owner,
+        &salt,
+        &0u64,
+        &u64::MAX,
+    );
+
+    let (topics, data) = latest_contract_event(&env, &client.address);
+    let event_name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "EscrowWithdrawn"));
+
+    let actual = receipt_reference_from_event(&env, data);
+    let expected = generate_receipt_reference(&env, &commitment, RECEIPT_REF_ACTION_WITHDRAW);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_refund_event_emits_deterministic_receipt_reference() {
+    let (env, token_id, client) = setup();
+    let owner = Address::generate(&env);
+    mint(&env, &token_id, &owner, 1000);
+
+    let timeout = 100u64;
+    let salt = Bytes::from_slice(&env, b"rr_refund_salt");
+    let commitment = client.deposit(
+        &token_id,
+        &1000,
+        &owner,
+        &salt,
+        &timeout,
+        &None,
+        &0u64,
+        &u64::MAX,
+    );
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + timeout + 1);
+    client.refund(&commitment, &owner, &0u64, &u64::MAX);
+
+    let (topics, data) = latest_contract_event(&env, &client.address);
+    let event_name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "EscrowRefunded"));
+
+    let actual = receipt_reference_from_event(&env, data);
+    let expected = generate_receipt_reference(&env, &commitment, RECEIPT_REF_ACTION_REFUND);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_refund_finalized_event_emits_deterministic_receipt_reference() {
+    let (env, token_id, client) = setup();
+    let owner = Address::generate(&env);
+    mint(&env, &token_id, &owner, 1000);
+
+    let timeout = 100u64;
+    let salt = Bytes::from_slice(&env, b"rr_refund_finalized_salt");
+    let commitment = client.deposit(
+        &token_id,
+        &1000,
+        &owner,
+        &salt,
+        &timeout,
+        &None,
+        &0u64,
+        &u64::MAX,
+    );
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + timeout + 1);
+    client.finalize_expired_escrow(&commitment);
+
+    let (topics, data) = latest_contract_event(&env, &client.address);
+    let event_name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "RefundFinalized"));
+
+    let actual = receipt_reference_from_event(&env, data);
+    let expected =
+        generate_receipt_reference(&env, &commitment, RECEIPT_REF_ACTION_REFUND_FINALIZED);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_finalized_event_emits_deterministic_receipt_reference() {
+    let (env, token_id, client) = setup();
+    let owner = Address::generate(&env);
+    let payer = Address::generate(&env);
+    mint(&env, &token_id, &owner, 700);
+    mint(&env, &token_id, &payer, 300);
+
+    let salt = Bytes::from_slice(&env, b"rr_finalize_salt");
+    let commitment = client.deposit_partial(
+        &token_id,
+        &1000,
+        &700,
+        &owner,
+        &salt,
+        &0u64,
+        &None,
+        &0u64,
+        &u64::MAX,
+    );
+
+    client.partial_payment(&commitment, &payer, &300, &0u64, &u64::MAX);
+
+    let (topics, data) = latest_contract_event(&env, &client.address);
+    let event_name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(event_name, Symbol::new(&env, "EscrowFinalized"));
+
+    let actual = receipt_reference_from_event(&env, data);
+    let expected = generate_receipt_reference(&env, &commitment, RECEIPT_REF_ACTION_FINALIZE);
+    assert_eq!(actual, expected);
 }

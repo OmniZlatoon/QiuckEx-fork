@@ -282,6 +282,34 @@ export const envSchema = Joi.object({
       "Max records per entity type processed per reconciliation run",
     ),
 
+  // Scheduled reconciliation run + drift alerting (BE-124)
+  RECONCILIATION_ENABLED: Joi.boolean()
+    .default(true)
+    .description("Enable the scheduled reconciliation worker (BE-124)"),
+  RECONCILIATION_CRON_EXPRESSION: Joi.string()
+    .default("*/5 * * * *")
+    .description("Cron expression for scheduled reconciliation runs (BE-124)"),
+  RECONCILIATION_DRIFT_COUNT_THRESHOLD: Joi.number()
+    .integer()
+    .min(0)
+    .default(5)
+    .description(
+      "Payment count discrepancy that raises a drift alert when exceeded (BE-124)",
+    ),
+  RECONCILIATION_DRIFT_AMOUNT_THRESHOLD_STROOPS: Joi.string()
+    .empty("")
+    .default("0")
+    .description(
+      "Payment amount discrepancy (in stroops) that raises a drift alert when exceeded (BE-124)",
+    ),
+  RECONCILIATION_CONSECUTIVE_FAILURE_ALERT_THRESHOLD: Joi.number()
+    .integer()
+    .min(1)
+    .default(3)
+    .description(
+      "Consecutive failed or skipped reconciliation runs that raise an alert (BE-124)",
+    ),
+
   // Rate limiting — optional bcrypt-hashed API keys (comma-separated)
   // Generate a hash: node -e "require('bcrypt').hash('MY_KEY', 10).then(console.log)"
   API_KEYS: Joi.string()
@@ -458,6 +486,21 @@ export const envSchema = Joi.object({
     .default(false)
     .description("Admin override to disable lag guard temporarily (for emergencies)"),
 
+  // ── Dead Letter Queue Monitor ────────────────────────────────────────────
+  DLQ_MONITOR_ENABLED: Joi.boolean()
+    .default(true)
+    .description("Whether the dead letter queue depth/age monitor is enabled"),
+  DLQ_ALERT_DEPTH_THRESHOLD: Joi.number()
+    .integer()
+    .min(1)
+    .default(50)
+    .description("Dead letter queue depth (per job type) that triggers an alert"),
+  DLQ_ALERT_AGE_THRESHOLD_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(3600000)
+    .description("Age in ms of the oldest dead-lettered job (per job type) that triggers an alert"),
+
   // ── Abuse Signal Configuration ──────────────────────────────────────────
   ABUSE_SIGNAL_RETENTION_DAYS: Joi.number()
     .integer()
@@ -547,6 +590,57 @@ export const envSchema = Joi.object({
       "HMAC-SHA256 secret used to sign and verify export download tokens. " +
         "Must be at least 32 characters. Rotate by cycling this value.",
     ),
+
+  // ---------------------------------------------------------------------------
+  // OpenTelemetry distributed tracing (BE-113; optional, defaults to enabled)
+  // ---------------------------------------------------------------------------
+
+  OTEL_ENABLED: Joi.boolean()
+    .optional()
+    .description(
+      "Enable OpenTelemetry tracing. Defaults to true, except NODE_ENV=test.",
+    ),
+
+  OTEL_SERVICE_NAME: Joi.string()
+    .empty("")
+    .default("quickex-backend")
+    .description("Service name reported on traces (service.name resource attribute)"),
+
+  OTEL_SERVICE_VERSION: Joi.string()
+    .empty("")
+    .optional()
+    .description("Service version reported on traces; falls back to APP_VERSION"),
+
+  OTEL_ENVIRONMENT: Joi.string()
+    .empty("")
+    .optional()
+    .description("deployment.environment.name resource attribute; falls back to NODE_ENV"),
+
+  OTEL_EXPORTER_OTLP_ENDPOINT: Joi.string()
+    .uri({ scheme: ["http", "https"] })
+    .empty("")
+    .optional()
+    .description(
+      "Base OTLP endpoint; /v1/traces is appended. Default: http://localhost:4318/v1/traces",
+    ),
+
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: Joi.string()
+    .uri({ scheme: ["http", "https"] })
+    .empty("")
+    .optional()
+    .description("Full OTLP/HTTP traces endpoint; overrides OTEL_EXPORTER_OTLP_ENDPOINT"),
+
+  OTEL_TRACE_SAMPLE_RATE: Joi.number()
+    .min(0)
+    .max(1)
+    .default(0.1)
+    .description(
+      "Root span sampling ratio (0.0-1.0). Kept low by default to keep tracing overhead acceptable under load.",
+    ),
+
+  OTEL_DEBUG: Joi.boolean()
+    .default(false)
+    .description("Enable verbose OpenTelemetry SDK diagnostic logging"),
 });
 
 /**
@@ -596,6 +690,11 @@ export interface EnvConfig {
   SENDGRID_FROM_EMAIL?: string;
   EXPO_ACCESS_TOKEN?: string;
   RECONCILIATION_BATCH_SIZE: number;
+  RECONCILIATION_ENABLED: boolean;
+  RECONCILIATION_CRON_EXPRESSION: string;
+  RECONCILIATION_DRIFT_COUNT_THRESHOLD: number;
+  RECONCILIATION_DRIFT_AMOUNT_THRESHOLD_STROOPS: string;
+  RECONCILIATION_CONSECUTIVE_FAILURE_ALERT_THRESHOLD: number;
   API_KEYS?: string;
   RATE_LIMIT_PUBLIC_BURST_LIMIT: number;
   RATE_LIMIT_PUBLIC_BURST_TTL_MS: number;
@@ -625,6 +724,9 @@ export interface EnvConfig {
   INDEXER_LAG_THRESHOLD_LEDGERS: number;
   INDEXER_LAG_GUARD_ENABLED: boolean;
   INDEXER_LAG_GUARD_OVERRIDE: boolean;
+  DLQ_MONITOR_ENABLED: boolean;
+  DLQ_ALERT_DEPTH_THRESHOLD: number;
+  DLQ_ALERT_AGE_THRESHOLD_MS: number;
   ABUSE_SIGNAL_RETENTION_DAYS: number;
   ABUSE_SIGNAL_SCORE_THRESHOLD: number;
   ABUSE_SIGNAL_GEO_ENABLED: boolean;
@@ -638,4 +740,12 @@ export interface EnvConfig {
   SEP24_POLL_BATCH_SIZE: number;
   EXPORT_ARTIFACT_TTL_HOURS: number;
   EXPORT_DOWNLOAD_SECRET: string;
+  OTEL_ENABLED?: boolean;
+  OTEL_SERVICE_NAME: string;
+  OTEL_SERVICE_VERSION?: string;
+  OTEL_ENVIRONMENT?: string;
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?: string;
+  OTEL_TRACE_SAMPLE_RATE: number;
+  OTEL_DEBUG: boolean;
 }
