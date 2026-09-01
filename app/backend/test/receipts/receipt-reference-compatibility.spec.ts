@@ -19,7 +19,7 @@ describe('Receipt Reference Compatibility (SC-W7-07)', () => {
     const mockReceiptHashService = {
       computeHash: jest.fn().mockReturnValue('rch_test_hash_1234567890abcdef'),
     };
-    normalizer = new ReceiptNormalizer(mockReceiptHashService as ReceiptHashService);
+    normalizer = new ReceiptNormalizer(mockReceiptHashService as unknown as ReceiptHashService);
   });
 
   // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ describe('Receipt Reference Compatibility (SC-W7-07)', () => {
     
     // Should still produce valid receipt hash
     expect(receipt.receiptHash).toBeDefined();
-    expect(receipt.receiptHash).toMatch(/^rch_[a-f0-9]{64}$/);
+    expect(receipt.receiptHash).toBe('rch_test_hash_1234567890abcdef');
   });
 
   test('should handle various receipt reference formats', () => {
